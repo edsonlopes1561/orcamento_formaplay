@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-
+import { supabase } from "./supabase";
 type Orcamento = {
   id: number;
   numero: string;
