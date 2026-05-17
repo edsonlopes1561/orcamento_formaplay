@@ -337,9 +337,9 @@ export default function App() {
         background: "rgba(255,255,255,.04)",
         border: "3px solid rgba(80,150,255,.55)",
         borderRadius: 28,
-        padding: "18px 36px",
+        padding: "10px 28px",
         boxShadow: "0 0 25px rgba(0,140,255,.35)",
-        marginBottom: 18,
+        marginBottom: 10,
         width: "fit-content",
       }}
     >
@@ -347,7 +347,7 @@ export default function App() {
         src="/logo.png"
         alt="FormaPlay"
         style={{
-          width: "clamp(180px, 42vw, 420px)",
+          width: "clamp(150px, 34vw, 320px)",
           height: "auto",
           objectFit: "contain",
           display: "block",
