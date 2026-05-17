@@ -340,38 +340,19 @@ export default function App() {
         padding: "18px 36px",
         boxShadow: "0 0 25px rgba(0,140,255,.35)",
         marginBottom: 18,
+        width: "fit-content",
       }}
     >
-      <div
+      <img
+        src="/logo.png"
+        alt="FormaPlay"
         style={{
-          tamanhoDaFonte: "clamp(34px, 7vw, 58px)" ,
-          fontWeight: 900,
-          lineHeight: 1,
-          letterSpacing: 1,
-          color: "white",
+          width: "clamp(180px, 42vw, 420px)",
+          height: "auto",
+          objectFit: "contain",
+          display: "block",
         }}
-      >
-        FORMA
-        <span
-          style={{
-            color: "#ffbe00",
-            marginLeft: 8,
-          }}
-        >
-          PLAY
-        </span>
-      </div>
-
-      <div
-        style={{
-          marginTop: 8,
-          color: "white",
-          fontSize: 24,
-          fontWeight: 700,
-        }}
-      >
-        Jogos Educacionais
-      </div>
+      />
     </div>
 
     <div
