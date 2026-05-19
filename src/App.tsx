@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { supabase } from "./supabase.ts";
 
 type Orcamento = {
   id: number;
@@ -53,41 +54,27 @@ export default function App() {
   const [prazoEntrega, setPrazoEntrega] = useState("A combinar");
   const [validade, setValidade] = useState("7 dias");
   const [pagamento, setPagamento] = useState("PIX ou transferência bancária");
-  const [observacoes, setObservacoes] = useState("Orçamento comercial sem valor fiscal.");
+  const [observacoes, setObservacoes] = useState(
+    "Orçamento comercial sem valor fiscal."
+  );
 
   const [numeroAtual, setNumeroAtual] = useState("0001");
   const [proximoNumero, setProximoNumero] = useState("0001");
   const [historico, setHistorico] = useState<Orcamento[]>([]);
 
+  const subtotal = useMemo(
+    () => quantidade * valorUnitario,
+    [quantidade, valorUnitario]
+  );
+
+  const total = useMemo(
+    () => subtotal + frete - desconto,
+    [subtotal, frete, desconto]
+  );
+
   useEffect(() => {
-    const dadosSalvos = localStorage.getItem("formaplay_orcamentos");
-    const numeroSalvo = localStorage.getItem("formaplay_numero_atual");
-    const clientes = localStorage.getItem("formaplay_clientes");
-
-    if (dadosSalvos) setHistorico(JSON.parse(dadosSalvos));
-    if (clientes) setClientesSalvos(JSON.parse(clientes));
-
-    if (numeroSalvo) {
-      setNumeroAtual(numeroSalvo);
-      setProximoNumero(numeroSalvo);
-    }
+    carregarDadosOnline();
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem("formaplay_orcamentos", JSON.stringify(historico));
-  }, [historico]);
-
-  useEffect(() => {
-    localStorage.setItem("formaplay_clientes", JSON.stringify(clientesSalvos));
-  }, [clientesSalvos]);
-
-  useEffect(() => {
-    localStorage.setItem("formaplay_numero_atual", proximoNumero);
-  }, [proximoNumero]);
-
-  const subtotal = useMemo(() => quantidade * valorUnitario, [quantidade, valorUnitario]);
-  const total = useMemo(() => subtotal + frete - desconto, [subtotal, frete, desconto]);
-
   function moeda(valor: number) {
     return valor.toLocaleString("pt-BR", {
       style: "currency",
@@ -95,30 +82,72 @@ export default function App() {
     });
   }
 
+  async function carregarDadosOnline() {
+    const { data: orcamentosData, error: erroOrcamentos } = await supabase
+      .from("orcamentos")
+      .select("*")
+      .order("id", { ascending: false });
+
+    if (!erroOrcamentos && orcamentosData) {
+      const lista: Orcamento[] = orcamentosData.map((item: any) => ({
+        id: item.id,
+        numero: item.numero,
+        cliente: item.cliente || "",
+        telefone: item.telefone || "",
+        cidade: item.cidade || "",
+        email: item.email || "",
+        produto: item.produto || "",
+        quantidade: Number(item.quantidade || 0),
+        valorUnitario: Number(item.valor_unitario || 0),
+        frete: Number(item.frete || 0),
+        desconto: Number(item.desconto || 0),
+        subtotal: Number(item.subtotal || 0),
+        total: Number(item.total || 0),
+        prazoEntrega: item.prazo_entrega || "",
+        validade: item.validade || "",
+        pagamento: item.pagamento || "",
+        observacoes: item.observacoes || "",
+        data: item.data_orcamento || "",
+      }));
+
+      setHistorico(lista);
+
+      const maiorNumero =
+        lista.length > 0
+          ? Math.max(...lista.map((item) => Number(item.numero)))
+          : 0;
+
+      const proximo = String(maiorNumero + 1).padStart(4, "0");
+
+      setNumeroAtual(proximo);
+      setProximoNumero(proximo);
+    }
+
+    const { data: clientesData, error: erroClientes } = await supabase
+      .from("clientes")
+      .select("*")
+      .order("id", { ascending: false });
+
+    if (!erroClientes && clientesData) {
+      const listaClientes: Cliente[] = clientesData.map((item: any) => ({
+        id: item.id,
+        nome: item.nome || "",
+        telefone: item.telefone || "",
+        cidade: item.cidade || "",
+        email: item.email || "",
+      }));
+
+      setClientesSalvos(listaClientes);
+    }
+  }
+
   function escolherProduto(nome: string) {
     const item = produtos.find((p) => p.nome === nome);
+
     if (item) {
       setProduto(item.nome);
       setValorUnitario(item.valor);
     }
-  }
-
-  function salvarCliente() {
-    if (!cliente.trim()) {
-      alert("Digite o nome do cliente antes de salvar.");
-      return;
-    }
-
-    const novoCliente: Cliente = {
-      id: Date.now(),
-      nome: cliente,
-      telefone,
-      cidade,
-      email,
-    };
-
-    setClientesSalvos([novoCliente, ...clientesSalvos]);
-    alert("Cliente salvo com sucesso!");
   }
 
   function selecionarCliente(id: string) {
@@ -134,42 +163,46 @@ export default function App() {
     }
   }
 
-  function excluirCliente(id: number) {
+  async function salvarCliente() {
+    if (!cliente.trim()) {
+      alert("Digite o nome do cliente antes de salvar.");
+      return;
+    }
+
+    const novoCliente = {
+      nome: cliente,
+      telefone,
+      cidade,
+      email,
+    };
+
+    const { error } = await supabase.from("clientes").insert([novoCliente]);
+
+    if (error) {
+      alert("Erro ao salvar cliente na nuvem.");
+      console.error(error);
+      return;
+    }
+
+    alert("Cliente salvo na nuvem com sucesso!");
+    await carregarDadosOnline();
+  }
+
+  async function excluirCliente(id: number) {
     if (confirm("Deseja excluir este cliente?")) {
-      setClientesSalvos(clientesSalvos.filter((c) => c.id !== id));
+      const { error } = await supabase.from("clientes").delete().eq("id", id);
+
+      if (error) {
+        alert("Erro ao excluir cliente.");
+        console.error(error);
+        return;
+      }
+
+      await carregarDadosOnline();
     }
   }
-
-  function imprimir() {
-    window.print();
-  }
-
-  function enviarWhatsApp() {
-    const mensagem =
-      `Olá! Segue o orçamento FormaPlay:%0A%0A` +
-      `Orçamento Nº ${numeroAtual}%0A` +
-      `Cliente: ${cliente || "Não informado"}%0A` +
-      `Telefone: ${telefone || "Não informado"}%0A` +
-      `Cidade/UF: ${cidade || "Não informado"}%0A` +
-      `E-mail: ${email || "Não informado"}%0A` +
-      `Produto: ${produto}%0A` +
-      `Quantidade: ${quantidade}%0A` +
-      `Valor unitário: ${moeda(valorUnitario)}%0A` +
-      `Subtotal: ${moeda(subtotal)}%0A` +
-      `Frete: ${moeda(frete)}%0A` +
-      `Desconto: ${moeda(desconto)}%0A` +
-      `Total final: ${moeda(total)}%0A%0A` +
-      `Prazo de entrega: ${prazoEntrega}%0A` +
-      `Validade: ${validade}%0A` +
-      `Pagamento: ${pagamento}%0A` +
-      `Observações: ${observacoes}`;
-
-    window.open(`https://wa.me/?text=${mensagem}`, "_blank");
-  }
-
-  function salvarOrcamento() {
-    const novo: Orcamento = {
-      id: Date.now(),
+  async function salvarOrcamento() {
+    const novo = {
       numero: numeroAtual,
       cliente: cliente || "Cliente não informado",
       telefone: telefone || "Não informado",
@@ -177,25 +210,65 @@ export default function App() {
       email: email || "Não informado",
       produto,
       quantidade,
-      valorUnitario,
+      valor_unitario: valorUnitario,
       frete,
       desconto,
       subtotal,
       total,
-      prazoEntrega,
+      prazo_entrega: prazoEntrega,
       validade,
       pagamento,
       observacoes,
-      data: new Date().toLocaleDateString("pt-BR"),
+      data_orcamento: new Date().toISOString().split("T")[0],
     };
 
-    setHistorico([novo, ...historico]);
+    const { error } = await supabase.from("orcamentos").insert([novo]);
 
-    const novoProximo = String(Number(proximoNumero) + 1).padStart(4, "0");
-    setProximoNumero(novoProximo);
-    setNumeroAtual(novoProximo);
+    if (error) {
+      alert("Erro ao salvar orçamento na nuvem.");
+      console.error(error);
+      return;
+    }
 
-    alert("Orçamento salvo com sucesso!");
+    alert("Orçamento salvo na nuvem com sucesso!");
+    await carregarDadosOnline();
+  }
+
+  async function excluirOrcamento(id: number) {
+    if (confirm("Deseja excluir este orçamento?")) {
+      const { error } = await supabase.from("orcamentos").delete().eq("id", id);
+
+      if (error) {
+        alert("Erro ao excluir orçamento.");
+        console.error(error);
+        return;
+      }
+
+      await carregarDadosOnline();
+    }
+  }
+
+  async function limparHistorico() {
+    if (confirm("Tem certeza que deseja apagar todo o histórico?")) {
+      const { error } = await supabase
+        .from("orcamentos")
+        .delete()
+        .neq("id", 0);
+
+      if (error) {
+        alert("Erro ao apagar histórico.");
+        console.error(error);
+        return;
+      }
+
+      setHistorico([]);
+      setNumeroAtual("0001");
+      setProximoNumero("0001");
+
+      await carregarDadosOnline();
+
+      alert("Histórico apagado com sucesso!");
+    }
   }
 
   function novoOrcamento() {
@@ -235,22 +308,32 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function excluirOrcamento(id: number) {
-    if (confirm("Deseja excluir este orçamento?")) {
-      setHistorico(historico.filter((item) => item.id !== id));
-    }
+  function imprimir() {
+    window.print();
   }
 
-  function limparHistorico() {
-    if (confirm("Tem certeza que deseja apagar todo o histórico?")) {
-      setHistorico([]);
-      setNumeroAtual("0001");
-      setProximoNumero("0001");
-      localStorage.removeItem("formaplay_orcamentos");
-      localStorage.removeItem("formaplay_numero_atual");
-    }
-  }
+  function enviarWhatsApp() {
+    const mensagem =
+      `Olá! Segue o orçamento FormaPlay:%0A%0A` +
+      `Orçamento Nº ${numeroAtual}%0A` +
+      `Cliente: ${cliente || "Não informado"}%0A` +
+      `Telefone: ${telefone || "Não informado"}%0A` +
+      `Cidade/UF: ${cidade || "Não informado"}%0A` +
+      `E-mail: ${email || "Não informado"}%0A` +
+      `Produto: ${produto}%0A` +
+      `Quantidade: ${quantidade}%0A` +
+      `Valor unitário: ${moeda(valorUnitario)}%0A` +
+      `Subtotal: ${moeda(subtotal)}%0A` +
+      `Frete: ${moeda(frete)}%0A` +
+      `Desconto: ${moeda(desconto)}%0A` +
+      `Total final: ${moeda(total)}%0A%0A` +
+      `Prazo de entrega: ${prazoEntrega}%0A` +
+      `Validade: ${validade}%0A` +
+      `Pagamento: ${pagamento}%0A` +
+      `Observações: ${observacoes}`;
 
+    window.open(`https://wa.me/?text=${mensagem}`, "_blank");
+  }
   return (
     <div style={page}>
       <style>
@@ -314,66 +397,66 @@ export default function App() {
 
       <div style={appBox} className="app-box">
         <div className="no-print">
-        <header
-  style={{
-    background: "linear-gradient(135deg,#00143a,#003b9a)",
-    padding: "28px 20px",
-    borderRadius: "0 0 26px 26px",
-    boxShadow: "0 8px 25px rgba(0,0,0,.25)",
-    marginBottom: 18,
-  }}
->
-  <div
-    style={{
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      textAlign: "center",
-    }}
-  >
-    <div
-      style={{
-        background: "rgba(255,255,255,.04)",
-        border: "3px solid rgba(80,150,255,.55)",
-        borderRadius: 28,
-        padding: "10px 28px",
-        boxShadow: "0 0 25px rgba(0,140,255,.35)",
-        marginBottom: 10,
-        width: "fit-content",
-      }}
-    >
-      <img
-        src="/logo.png"
-        alt="FormaPlay"
-        style={{
-          width: "clamp(150px, 34vw, 320px)",
-          height: "auto",
-          objectFit: "contain",
-          display: "block",
-        }}
-      />
-    </div>
+          <header
+            style={{
+              background: "linear-gradient(135deg,#00143a,#003b9a)",
+              padding: "22px 20px",
+              borderRadius: "0 0 26px 26px",
+              boxShadow: "0 8px 25px rgba(0,0,0,.25)",
+              marginBottom: 18,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                textAlign: "center",
+              }}
+            >
+              <div
+                style={{
+                  background: "rgba(255,255,255,.04)",
+                  border: "3px solid rgba(80,150,255,.55)",
+                  borderRadius: 28,
+                  padding: "10px 28px",
+                  boxShadow: "0 0 25px rgba(0,140,255,.35)",
+                  marginBottom: 10,
+                  width: "fit-content",
+                }}
+              >
+                <img
+                  src="/logo.png"
+                  alt="FormaPlay"
+                  style={{
+                    width: "clamp(150px, 34vw, 320px)",
+                    height: "auto",
+                    objectFit: "contain",
+                    display: "block",
+                  }}
+                />
+              </div>
 
-    <div
-      style={{
-        display: "flex",
-        gap: 26,
-        flexWrap: "wrap",
-        justifyContent: "center",
-        color: "white",
-        fontSize: 20,
-        fontWeight: 600,
-      }}
-    >
-      <span>🧾 Orçamento</span>
-      <span>👥 Clientes</span>
-      <span>📦 Produtos</span>
-      <span>🚚 Frete</span>
-      <span>📊 Relatórios</span>
-    </div>
-  </div>
-</header>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 22,
+                  flexWrap: "wrap",
+                  justifyContent: "center",
+                  color: "white",
+                  fontSize: 18,
+                  fontWeight: 600,
+                }}
+              >
+                <span>🧾 Orçamento</span>
+                <span>👥 Clientes</span>
+                <span>📦 Produtos</span>
+                <span>🚚 Frete</span>
+                <span>📊 Relatórios</span>
+              </div>
+            </div>
+          </header>
 
           <section style={hero}>
             <h2 style={{ margin: 0 }}>FORMA PLAY</h2>
@@ -386,13 +469,16 @@ export default function App() {
               <div style={cardIcone}>📈<br />Analisar</div>
             </div>
           </section>
-
           <main style={conteudo}>
             <section style={card}>
               <h2>Dados do cliente</h2>
 
               <label style={label}>Selecionar cliente salvo</label>
-              <select value={clienteSelecionado} onChange={(e) => selecionarCliente(e.target.value)} style={input}>
+              <select
+                value={clienteSelecionado}
+                onChange={(e) => selecionarCliente(e.target.value)}
+                style={input}
+              >
                 <option value="">Novo cliente / Digitar manualmente</option>
                 {clientesSalvos.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -402,16 +488,36 @@ export default function App() {
               </select>
 
               <label style={label}>Cliente</label>
-              <input value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="Nome do cliente" style={input} />
+              <input
+                value={cliente}
+                onChange={(e) => setCliente(e.target.value)}
+                placeholder="Nome do cliente"
+                style={input}
+              />
 
               <label style={label}>Telefone</label>
-              <input value={telefone} onChange={(e) => setTelefone(e.target.value)} placeholder="(14) 99999-9999" style={input} />
+              <input
+                value={telefone}
+                onChange={(e) => setTelefone(e.target.value)}
+                placeholder="(14) 99999-9999"
+                style={input}
+              />
 
               <label style={label}>Cidade / UF</label>
-              <input value={cidade} onChange={(e) => setCidade(e.target.value)} placeholder="Ex: Jaú / SP" style={input} />
+              <input
+                value={cidade}
+                onChange={(e) => setCidade(e.target.value)}
+                placeholder="Ex: Jaú / SP"
+                style={input}
+              />
 
               <label style={label}>E-mail</label>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="cliente@email.com" style={input} />
+              <input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="cliente@email.com"
+                style={input}
+              />
 
               <button style={botaoRoxo} onClick={salvarCliente}>
                 Salvar cliente
@@ -422,7 +528,11 @@ export default function App() {
               <h2>Produto</h2>
 
               <label style={label}>Produto</label>
-              <select value={produto} onChange={(e) => escolherProduto(e.target.value)} style={input}>
+              <select
+                value={produto}
+                onChange={(e) => escolherProduto(e.target.value)}
+                style={input}
+              >
                 {produtos.map((item) => (
                   <option key={item.nome} value={item.nome}>
                     {item.nome} - {moeda(item.valor)}
@@ -433,24 +543,44 @@ export default function App() {
               <div style={duasColunas}>
                 <div>
                   <label style={label}>Quantidade</label>
-                  <input type="number" value={quantidade} onChange={(e) => setQuantidade(Number(e.target.value))} style={input} />
+                  <input
+                    type="number"
+                    value={quantidade}
+                    onChange={(e) => setQuantidade(Number(e.target.value))}
+                    style={input}
+                  />
                 </div>
 
                 <div>
                   <label style={label}>Valor unitário</label>
-                  <input type="number" value={valorUnitario} onChange={(e) => setValorUnitario(Number(e.target.value))} style={input} />
+                  <input
+                    type="number"
+                    value={valorUnitario}
+                    onChange={(e) => setValorUnitario(Number(e.target.value))}
+                    style={input}
+                  />
                 </div>
               </div>
 
               <div style={duasColunas}>
                 <div>
                   <label style={label}>Frete</label>
-                  <input type="number" value={frete} onChange={(e) => setFrete(Number(e.target.value))} style={input} />
+                  <input
+                    type="number"
+                    value={frete}
+                    onChange={(e) => setFrete(Number(e.target.value))}
+                    style={input}
+                  />
                 </div>
 
                 <div>
                   <label style={label}>Desconto</label>
-                  <input type="number" value={desconto} onChange={(e) => setDesconto(Number(e.target.value))} style={input} />
+                  <input
+                    type="number"
+                    value={desconto}
+                    onChange={(e) => setDesconto(Number(e.target.value))}
+                    style={input}
+                  />
                 </div>
               </div>
             </section>
@@ -459,16 +589,32 @@ export default function App() {
               <h2>Condições comerciais</h2>
 
               <label style={label}>Prazo de entrega</label>
-              <input value={prazoEntrega} onChange={(e) => setPrazoEntrega(e.target.value)} style={input} />
+              <input
+                value={prazoEntrega}
+                onChange={(e) => setPrazoEntrega(e.target.value)}
+                style={input}
+              />
 
               <label style={label}>Validade do orçamento</label>
-              <input value={validade} onChange={(e) => setValidade(e.target.value)} style={input} />
+              <input
+                value={validade}
+                onChange={(e) => setValidade(e.target.value)}
+                style={input}
+              />
 
               <label style={label}>Forma de pagamento</label>
-              <input value={pagamento} onChange={(e) => setPagamento(e.target.value)} style={input} />
+              <input
+                value={pagamento}
+                onChange={(e) => setPagamento(e.target.value)}
+                style={input}
+              />
 
               <label style={label}>Observações</label>
-              <textarea value={observacoes} onChange={(e) => setObservacoes(e.target.value)} style={textarea} />
+              <textarea
+                value={observacoes}
+                onChange={(e) => setObservacoes(e.target.value)}
+                style={textarea}
+              />
             </section>
 
             <section style={card}>
@@ -483,13 +629,20 @@ export default function App() {
                 <strong>{moeda(total)}</strong>
               </div>
 
-              <button style={botaoCinza} onClick={novoOrcamento}>Novo orçamento</button>
-              <button style={botaoLaranja} onClick={salvarOrcamento}>Salvar orçamento</button>
-              <button style={botaoAzul} onClick={imprimir}>Gerar PDF / Imprimir</button>
-              <button style={botaoVerde} onClick={enviarWhatsApp}>Enviar por WhatsApp</button>
+              <button style={botaoCinza} onClick={novoOrcamento}>
+                Novo orçamento
+              </button>
+              <button style={botaoLaranja} onClick={salvarOrcamento}>
+                Salvar orçamento
+              </button>
+              <button style={botaoAzul} onClick={imprimir}>
+                Gerar PDF / Imprimir
+              </button>
+              <button style={botaoVerde} onClick={enviarWhatsApp}>
+                Enviar por WhatsApp
+              </button>
             </section>
           </main>
-
           <section style={clientesBox}>
             <h2>Clientes salvos</h2>
 
@@ -501,10 +654,15 @@ export default function App() {
                   <div>
                     <strong>{c.nome}</strong>
                     <p style={{ margin: "4px 0" }}>{c.telefone}</p>
-                    <small>{c.cidade} • {c.email}</small>
+                    <small>
+                      {c.cidade} • {c.email}
+                    </small>
                   </div>
 
-                  <button style={botaoPequenoVermelho} onClick={() => excluirCliente(c.id)}>
+                  <button
+                    style={botaoPequenoVermelho}
+                    onClick={() => excluirCliente(c.id)}
+                  >
                     Excluir
                   </button>
                 </div>
@@ -523,16 +681,28 @@ export default function App() {
             </div>
 
             <div style={{ textAlign: "right" }}>
-              <strong style={{ fontSize: 17 }}>ORÇAMENTO #{numeroAtual}</strong>
-              <p style={{ margin: "5px 0 0" }}>{new Date().toLocaleDateString("pt-BR")}</p>
+              <strong style={{ fontSize: 17 }}>
+                ORÇAMENTO #{numeroAtual}
+              </strong>
+              <p style={{ margin: "5px 0 0" }}>
+                {new Date().toLocaleDateString("pt-BR")}
+              </p>
             </div>
           </div>
 
           <div style={dadosClientePrint}>
-            <p><strong>Cliente:</strong> {cliente || "Não informado"}</p>
-            <p><strong>Telefone:</strong> {telefone || "Não informado"}</p>
-            <p><strong>Cidade/UF:</strong> {cidade || "Não informado"}</p>
-            <p><strong>E-mail:</strong> {email || "Não informado"}</p>
+            <p>
+              <strong>Cliente:</strong> {cliente || "Não informado"}
+            </p>
+            <p>
+              <strong>Telefone:</strong> {telefone || "Não informado"}
+            </p>
+            <p>
+              <strong>Cidade/UF:</strong> {cidade || "Não informado"}
+            </p>
+            <p>
+              <strong>E-mail:</strong> {email || "Não informado"}
+            </p>
           </div>
 
           <table style={tabelaPrint}>
@@ -567,10 +737,18 @@ export default function App() {
           </div>
 
           <div style={condicoesBoxPrint}>
-            <p><strong>Prazo de entrega:</strong> {prazoEntrega}</p>
-            <p><strong>Validade:</strong> {validade}</p>
-            <p><strong>Pagamento:</strong> {pagamento}</p>
-            <p><strong>Observações:</strong> {observacoes}</p>
+            <p>
+              <strong>Prazo de entrega:</strong> {prazoEntrega}
+            </p>
+            <p>
+              <strong>Validade:</strong> {validade}
+            </p>
+            <p>
+              <strong>Pagamento:</strong> {pagamento}
+            </p>
+            <p>
+              <strong>Observações:</strong> {observacoes}
+            </p>
           </div>
 
           <div style={assinaturaBox}>
@@ -579,14 +757,15 @@ export default function App() {
           </div>
 
           <footer style={rodapePrint}>
-            FormaPlay • Orçamento comercial sem valor fiscal
+            FormaPlay Jogos Educacionais • CNPJ: 00.000.000/0001-00 • WhatsApp: (14) 99999-9999 • E-mail: contato@formaplay.com.br • Orçamento comercial sem valor fiscal
           </footer>
         </section>
-
         <section style={historicoBox} className="no-print">
           <div style={historicoTopo}>
             <h2>Histórico de orçamentos</h2>
-            <button style={botaoLimpar} onClick={limparHistorico}>Limpar histórico</button>
+            <button style={botaoLimpar} onClick={limparHistorico}>
+              Limpar histórico
+            </button>
           </div>
 
           {historico.length === 0 ? (
@@ -597,15 +776,29 @@ export default function App() {
                 <div>
                   <strong>ORÇAMENTO #{item.numero}</strong>
                   <p style={{ margin: "4px 0" }}>{item.cliente}</p>
-                  <small>{item.data} • {item.produto}</small>
+                  <small>
+                    {item.data} • {item.produto}
+                  </small>
                 </div>
 
                 <div style={{ textAlign: "right" }}>
-                  <strong style={{ color: "green" }}>{moeda(item.total)}</strong>
+                  <strong style={{ color: "green" }}>
+                    {moeda(item.total)}
+                  </strong>
 
                   <div style={{ marginTop: 10 }}>
-                    <button style={botaoPequenoAzul} onClick={() => carregarOrcamento(item)}>Carregar</button>
-                    <button style={botaoPequenoVermelho} onClick={() => excluirOrcamento(item.id)}>Excluir</button>
+                    <button
+                      style={botaoPequenoAzul}
+                      onClick={() => carregarOrcamento(item)}
+                    >
+                      Carregar
+                    </button>
+                    <button
+                      style={botaoPequenoVermelho}
+                      onClick={() => excluirOrcamento(item.id)}
+                    >
+                      Excluir
+                    </button>
                   </div>
                 </div>
               </div>
@@ -625,7 +818,6 @@ function Linha({ nome, valor }: { nome: string; valor: string }) {
     </div>
   );
 }
-
 const page: React.CSSProperties = {
   fontFamily: "Arial",
   background: "#dfeeff",
@@ -640,27 +832,6 @@ const appBox: React.CSSProperties = {
   borderRadius: 24,
   overflow: "hidden",
   boxShadow: "0 20px 50px rgba(0,0,0,.18)",
-};
-
-const topHeader: React.CSSProperties = {
-  background: "linear-gradient(135deg,#001d3d,#0058d8)",
-  color: "white",
-  padding: 24,
-};
-
-const logoTexto: React.CSSProperties = {
-  fontSize: 32,
-  fontWeight: 900,
-  letterSpacing: 1,
-  marginBottom: 8,
-  color: "white",
-};
-
-const menu: React.CSSProperties = {
-  display: "flex",
-  gap: 12,
-  marginTop: 20,
-  flexWrap: "wrap",
 };
 
 const hero: React.CSSProperties = {
@@ -835,71 +1006,52 @@ const celulaPrint: React.CSSProperties = {
 };
 
 const resumoPrint: React.CSSProperties = {
-  marginLeft: "auto",
-  marginTop: 12,
-  maxWidth: 300,
+  marginTop: 18,
   background: "#f8fbff",
-  border: "1px solid #d6e6fa",
-  borderRadius: 12,
-  padding: 12,
+  borderRadius: 14,
+  padding: 14,
 };
 
 const totalPrint: React.CSSProperties = {
+  marginTop: 12,
+  background: "#e8fff0",
+  borderRadius: 12,
+  padding: 14,
   display: "flex",
   justifyContent: "space-between",
-  borderTop: "2px solid #dce8f8",
-  paddingTop: 10,
-  marginTop: 10,
-  color: "green",
-  fontSize: 20,
+  fontSize: 22,
+  color: "#067a2f",
   fontWeight: "bold",
 };
 
 const condicoesBoxPrint: React.CSSProperties = {
-  marginTop: 12,
+  marginTop: 18,
   background: "#f8fbff",
-  border: "1px solid #d6e6fa",
   borderRadius: 14,
-  padding: 12,
+  padding: 14,
+  border: "1px solid #dce8f8",
 };
 
 const assinaturaBox: React.CSSProperties = {
-  marginTop: 28,
+  marginTop: 45,
   textAlign: "center",
 };
 
 const linhaAssinatura: React.CSSProperties = {
+  borderTop: "1px solid #000",
   width: 260,
-  borderTop: "1px solid #333",
-  margin: "0 auto 6px",
+  margin: "0 auto 10px",
 };
 
 const rodapePrint: React.CSSProperties = {
-  marginTop: 14,
-  paddingTop: 10,
-  borderTop: "1px solid #d6e6fa",
+  marginTop: 24,
   textAlign: "center",
-  color: "#666",
-  fontSize: 12,
-};
-
-const clientesBox: React.CSSProperties = {
-  margin: 20,
-  background: "#f8fbff",
-  border: "1px solid #d6e6fa",
-  borderRadius: 18,
-  padding: 20,
-};
-
-const clienteItem: React.CSSProperties = {
-  background: "white",
-  border: "1px solid #d6e6fa",
-  borderRadius: 14,
-  padding: 16,
-  marginTop: 12,
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 12,
+  color: "#555",
+  fontSize: 11,
+  lineHeight: "18px",
+  maxWidth: 680,
+  marginLeft: "auto",
+  marginRight: "auto",
 };
 
 const historicoBox: React.CSSProperties = {
@@ -914,18 +1066,38 @@ const historicoTopo: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
-  gap: 12,
+  gap: 10,
+  marginBottom: 18,
 };
 
 const historicoItem: React.CSSProperties = {
-  background: "white",
-  border: "1px solid #d6e6fa",
-  borderRadius: 14,
-  padding: 16,
-  marginTop: 12,
   display: "flex",
   justifyContent: "space-between",
-  gap: 12,
+  alignItems: "center",
+  padding: 16,
+  borderRadius: 14,
+  background: "white",
+  marginBottom: 12,
+  border: "1px solid #dce8f8",
+};
+
+const clientesBox: React.CSSProperties = {
+  margin: 20,
+  background: "#f8fbff",
+  border: "1px solid #d6e6fa",
+  borderRadius: 18,
+  padding: 20,
+};
+
+const clienteItem: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  padding: 14,
+  borderRadius: 14,
+  background: "white",
+  marginBottom: 10,
+  border: "1px solid #dce8f8",
 };
 
 const botaoLimpar: React.CSSProperties = {
@@ -933,7 +1105,7 @@ const botaoLimpar: React.CSSProperties = {
   color: "white",
   border: "none",
   borderRadius: 10,
-  padding: "10px 14px",
+  padding: "10px 16px",
   fontWeight: "bold",
 };
 
@@ -943,8 +1115,8 @@ const botaoPequenoAzul: React.CSSProperties = {
   border: "none",
   borderRadius: 8,
   padding: "8px 10px",
-  marginRight: 6,
   fontWeight: "bold",
+  marginRight: 8,
 };
 
 const botaoPequenoVermelho: React.CSSProperties = {
